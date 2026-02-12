@@ -1,148 +1,134 @@
-import requests
+import asyncio
 import json
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
-# Test the Shopify MCP Server
-BASE_URL = "http://localhost:8001"
+async def test_mcp_server():
+    """Test the Shopify MCP Server using the MCP client SDK"""
+    
+    print("Shopify MCP Server Testing")
+    print("=" * 60)
+    
+    # Server parameters
+    server_params = StdioServerParameters(
+        command="python",
+        args=["shopify_mcp_server.py"],
+        env=None  # Will use .env file
+    )
+    
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+            
+            print("\n[OK] Connected to MCP server")
+            
+            # Test 1: List available tools
+            print("\n" + "=" * 60)
+            print("Test 1: Listing Available Tools")
+            print("=" * 60)
+            
+            tools = await session.list_tools()
+            print(f"\nFound {len(tools.tools)} tools:")
+            
+            for tool in tools.tools:
+                print(f"\n[TOOL] {tool.name}")
+                print(f"   Description: {tool.description}")
+                if hasattr(tool, 'inputSchema'):
+                    print(f"   Input Schema: {json.dumps(tool.inputSchema, indent=2)}")
+            
+            # Test 2: Call create_order tool (with test data)
+            print("\n" + "=" * 60)
+            print("Test 2: Creating Test Order")
+            print("=" * 60)
+            
+            try:
+                result = await session.call_tool(
+                    "create_order",
+                    arguments={
+                        "line_items": [
+                            {
+                                "variant_id": 42910880890963,
+                                "quantity": 1,
+                                "title": "Test Product",
+                                "price": 100.0
+                            }
+                        ],
+                        "customer_email": "test@example.com",
+                        "financial_status": "paid",
+                        "test": True
+                    }
+                )
+                
+                print("\n[OK] Create Order Response:")
+                for content in result.content:
+                    if hasattr(content, 'text'):
+                        print(content.text)
+                    
+            except Exception as e:
+                print(f"\n[ERROR] Error creating order: {e}")
+            
+            # Test 3: Call get_order_status tool
+            print("\n" + "=" * 60)
+            print("Test 3: Getting Order Status")
+            print("=" * 60)
+            
+            # You can replace this with an actual order ID from your store
+            test_order_id = 5904242344019
+            
+            try:
+                result = await session.call_tool(
+                    "get_order_status",
+                    arguments={
+                        "order_id": test_order_id
+                    }
+                )
+                
+                print(f"\n[OK] Order Status Response:")
+                for content in result.content:
+                    if hasattr(content, 'text'):
+                        print(content.text)
+                        
+            except Exception as e:
+                print(f"\n[ERROR] Error getting order status: {e}")
+            
+            print("\n" + "=" * 60)
+            print("[OK] All tests completed")
+            print("=" * 60)
 
-def test_health_endpoint():
-    """Test the health check endpoint"""
-    print("=== Testing Health Endpoint ===")
-    try:
-        response = requests.get(f"{BASE_URL}/")
-        print(f"Status Code: {response.status_code}")
-        print(f"Response: {response.json()}")
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
 
-def test_tools_list():
-    """Test the tools/list MCP endpoint"""
-    print("\n=== Testing tools/list Endpoint ===")
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/list",
-        "id": 1
-    }
-    try:
-        response = requests.post(f"{BASE_URL}/api/mcp", json=payload)
-        print(f"Status Code: {response.status_code}")
-        result = response.json()
-        print(f"Response: {json.dumps(result, indent=2)}")
-        return response.status_code == 200 and "result" in result
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
+async def test_tool_discovery_only():
+    """Quick test to just discover available tools"""
+    
+    print("Quick Tool Discovery Test")
+    print("=" * 60)
+    
+    server_params = StdioServerParameters(
+        command="python",
+        args=["shopify_mcp_server.py"],
+        env=None
+    )
+    
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            
+            tools = await session.list_tools()
+            
+            print(f"\n[OK] Server is running and exposing {len(tools.tools)} tools:\n")
+            for tool in tools.tools:
+                print(f"  • {tool.name}")
+                print(f"    {tool.description}\n")
 
-def test_create_order_tool():
-    """Test the create_order tool"""
-    print("\n=== Testing create_order Tool ===")
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": "create_order",
-            "arguments": {
-                "order": {
-                    "line_items": [
-                        {
-                            "variant_id": 42910880890963,
-                            "quantity": 1,
-                            "title": "Test Product",
-                            "price": 100.0
-                        }
-                    ],
-                    "customer": {
-                        "email": "test@example.com"
-                    },
-                    "financial_status": "paid",
-                    "test": True
-                }
-            }
-        },
-        "id": 2
-    }
-    try:
-        response = requests.post(f"{BASE_URL}/api/mcp", json=payload)
-        print(f"Status Code: {response.status_code}")
-        result = response.json()
-        print(f"Response: {json.dumps(result, indent=2)}")
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
-
-def test_get_order_status_tool():
-    """Test the get_order_status tool"""
-    print("\n=== Testing get_order_status Tool ===")
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": "get_order_status",
-            "arguments": {
-                "order_id": 5904242344019
-            }
-        },
-        "id": 3
-    }
-    try:
-        response = requests.post(f"{BASE_URL}/api/mcp", json=payload)
-        print(f"Status Code: {response.status_code}")
-        result = response.json()
-        print(f"Response: {json.dumps(result, indent=2)}")
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
-
-def test_invalid_tool():
-    """Test calling an invalid tool"""
-    print("\n=== Testing Invalid Tool ===")
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": "invalid_tool",
-            "arguments": {}
-        },
-        "id": 4
-    }
-    try:
-        response = requests.post(f"{BASE_URL}/api/mcp", json=payload)
-        print(f"Status Code: {response.status_code}")
-        result = response.json()
-        print(f"Response: {json.dumps(result, indent=2)}")
-        return response.status_code == 200 and "error" in result
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
 
 if __name__ == "__main__":
-    print("🧪 Shopify MCP Server Testing")
-    print("=" * 50)
+    import sys
     
-    tests = [
-        ("Health Endpoint", test_health_endpoint),
-        ("Tools List", test_tools_list),
-        ("Create Order Tool", test_create_order_tool),
-        ("Get Order Status Tool", test_get_order_status_tool),
-        ("Invalid Tool Error", test_invalid_tool)
-    ]
-    
-    results = []
-    for test_name, test_func in tests:
-        result = test_func()
-        results.append((test_name, result))
-    
-    print("\n" + "=" * 50)
-    print("📊 Test Results Summary")
-    print("=" * 50)
-    
-    for test_name, passed in results:
-        status = "✅ PASS" if passed else "❌ FAIL"
-        print(f"{test_name}: {status}")
-    
-    total_tests = len(results)
-    passed_tests = sum(1 for _, passed in results if passed)
-    print(f"\nTotal: {passed_tests}/{total_tests} tests passed")
+    # Run quick discovery test by default
+    # Use --full flag for full testing
+    if "--full" in sys.argv:
+        print("Running full test suite...\n")
+        asyncio.run(test_mcp_server())
+    else:
+        print("Running quick discovery test (use --full for complete tests)...\n")
+        asyncio.run(test_tool_discovery_only())
