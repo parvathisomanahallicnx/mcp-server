@@ -18,8 +18,8 @@ SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 # Enable dummy responses for testing (returns mock data when API fails)
 USE_DUMMY_RESPONSES = os.getenv("USE_DUMMY_RESPONSES", "false").lower() in ("true", "1", "yes")
 
-# Initialize FastMCP server
-mcp = FastMCP("shopify-orders")
+# Initialize FastMCP server (host=0.0.0.0 allows any Host header for cloud deployment)
+mcp = FastMCP("shopify-orders", host="0.0.0.0")
 
 # Expose ASGI app for uvicorn deployment (Render, Railway, etc.)
 # Using Streamable HTTP transport (recommended for MCP SDK >= 1.2.0)
