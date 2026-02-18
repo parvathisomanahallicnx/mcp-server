@@ -21,6 +21,9 @@ USE_DUMMY_RESPONSES = os.getenv("USE_DUMMY_RESPONSES", "false").lower() in ("tru
 # Initialize FastMCP server
 mcp = FastMCP("shopify-orders")
 
+# Expose ASGI app for uvicorn deployment (Render, Railway, etc.)
+app = mcp.sse_app()
+
 async def _make_shopify_request(
     method: str, 
     endpoint: str, 

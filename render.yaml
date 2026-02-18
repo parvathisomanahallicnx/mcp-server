@@ -4,4 +4,6 @@ services:
     env: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn shopify_mcp_server:app --host 0.0.0.0 --port $PORT"
-    healthCheckPath: /
+    envVars:
+      - key: MCP_TRANSPORT
+        value: sse
