@@ -22,7 +22,8 @@ USE_DUMMY_RESPONSES = os.getenv("USE_DUMMY_RESPONSES", "false").lower() in ("tru
 mcp = FastMCP("shopify-orders")
 
 # Expose ASGI app for uvicorn deployment (Render, Railway, etc.)
-app = mcp.sse_app()
+# Using Streamable HTTP transport (recommended for MCP SDK >= 1.2.0)
+app = mcp.streamable_http_app()
 
 async def _make_shopify_request(
     method: str, 
