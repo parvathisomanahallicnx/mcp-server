@@ -4,6 +4,10 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
+from starlette.applications import Starlette
+from starlette.routing import Route, Mount
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,9 +25,8 @@ USE_DUMMY_RESPONSES = os.getenv("USE_DUMMY_RESPONSES", "false").lower() in ("tru
 # Initialize FastMCP server (host=0.0.0.0 allows any Host header for cloud deployment)
 mcp = FastMCP("shopify-orders", host="0.0.0.0")
 
-# Expose ASGI app for uvicorn deployment (Render, Railway, etc.)
-# Using Streamable HTTP transport (recommended for MCP SDK >= 1.2.0)
-app = mcp.streamable_http_app()
+# MCP ASGI app (Streamable HTTP transport)
+mcp_app = mcp.streamable_http_app()
 
 async def _make_shopify_request(
     method: str, 
@@ -437,9 +440,51 @@ async def get_order_status(order_id: int) -> str:
         }, indent=2)
 
 
+# === REST API ENDPOINTS (for n8n, HTTP clients, etc.) ===
+async def api_create_order(request: Request) -> JSONResponse:
+    """REST API endpoint: POST /api/create_order"""
+    try:
+        body = await request.json()
+        result_json = await create_order(
+            line_items=body.get("line_items", []),
+            customer_email=body.get("customer_email"),
+            financial_status=body.get("financial_status", "pending"),
+            test=body.get("test", True)
+        )
+        return JSONResponse(json.loads(result_json))
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+async def api_order_status(request: Request) -> JSONResponse:
+    """REST API endpoint: GET /api/order_status?order_id=123"""
+    try:
+        order_id = request.query_params.get("order_id")
+        if not order_id:
+            return JSONResponse({"success": False, "error": "order_id is required"}, status_code=400)
+        result_json = await get_order_status(int(order_id))
+        return JSONResponse(json.loads(result_json))
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+async def api_health(request: Request) -> JSONResponse:
+    """Health check endpoint"""
+    return JSONResponse({"status": "ok", "tools": ["create_order", "get_order_status"]})
+
+# Combined ASGI app: MCP at /mcp, REST at /api/*
+app = Starlette(
+    routes=[
+        Mount("/mcp", app=mcp_app),
+        Route("/api/create_order", api_create_order, methods=["POST"]),
+        Route("/api/order_status", api_order_status, methods=["GET"]),
+        Route("/api/health", api_health, methods=["GET"]),
+        Route("/", api_health, methods=["GET"]),
+    ]
+)
+
 if __name__ == "__main__":
     # Auto-detect transport mode:
     # - STDIO for local testing (MCP Inspector, Claude Desktop)
     # - SSE for remote deployment (Railway, Render)
     transport_mode = os.getenv("MCP_TRANSPORT", "stdio").lower()
     mcp.run(transport=transport_mode)
+

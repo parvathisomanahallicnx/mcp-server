@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import asyncio
 import requests
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END, START
@@ -16,8 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBrICxhOlWaGmGBBEDbnczELPzfTnAs8Uc")
 PRODUCT_SEARCH_MCP_URL = "https://n5ycpj-wu.myshopify.com/api/mcp"
-# MCP Server deployed on Render (SSE transport)
-ORDER_MCP_URL = os.getenv("ORDER_MCP_URL", "https://cnx-demo-mcp-server.onrender.com")
+# MCP Server deployed on Render (Streamable HTTP transport)
+ORDER_MCP_URL = os.getenv("ORDER_MCP_URL", "https://cnx-demo-mcp-server-wmck.onrender.com/mcp")
 USE_LOCAL_MCP = os.getenv("USE_LOCAL_MCP", "false").lower() in ("true", "1", "yes")
 
 # === MCP SERVER INTEGRATION ===
@@ -43,37 +44,41 @@ def call_mcp_server_local(tool_name: str, arguments: dict) -> dict:
     except Exception as e:
         return {"error": f"Local MCP call error: {str(e)}"}
 
+async def call_mcp_server_remote(url: str, tool_name: str, arguments: dict) -> dict:
+    """Call remote MCP server using Streamable HTTP transport (MCP SDK)"""
+    try:
+        from mcp.client.streamable_http import streamablehttp_client
+        from mcp import ClientSession
+
+        async with streamablehttp_client(url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+                # Extract text content from MCP response
+                for content in result.content:
+                    if hasattr(content, 'text'):
+                        return json.loads(content.text)
+                return {"error": "No text content in MCP response"}
+    except Exception as e:
+        return {"error": f"MCP server error: {str(e)}"}
+
 def call_mcp_server(url: str, tool_name: str, arguments: dict) -> dict:
-    """Generic MCP server call function (supports both old HTTP and new SDK servers)"""
+    """Generic MCP server call function (supports local and remote MCP servers)"""
     
     # Use local direct calls if enabled
     if USE_LOCAL_MCP:
         return call_mcp_server_local(tool_name, arguments)
     
-    # HTTP/SSE transport for remote servers
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": arguments
-        },
-        "id": 1
-    }
-    
+    # Use MCP SDK Streamable HTTP client for remote servers
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        
-        if "result" in result and "content" in result["result"]:
-            content = result["result"]["content"]
-            if content and "text" in content[0]:
-                return json.loads(content[0]["text"])
-        
-        return {"error": "Invalid MCP response format"}
-    except Exception as e:
-        return {"error": f"MCP server error: {str(e)}"}
+        return asyncio.run(call_mcp_server_remote(url, tool_name, arguments))
+    except RuntimeError:
+        # If event loop is already running, use nest_asyncio or create new loop
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(call_mcp_server_remote(url, tool_name, arguments))
+        finally:
+            loop.close()
 
 # === LLM Setup using Google Generative AI directly ===
 def call_gemini_llm(prompt: str) -> str:
